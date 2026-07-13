@@ -103,7 +103,7 @@ git commitが自然なチェックポイント兼監査。共有Confluenceへの
 - [x] 少数ソースでの手動ingest検証（合成サンプル3件・VTT/pptx/Teams CSV）。抽出→レビュー→wiki反映→index/overview更新→log追記の一連のワークフローを確認。詳細は `wiki/log.md` の2026-07-13 22:00エントリ
 - [ ] `scripts/search.py`
 - [x] `scripts/lint.py`（frontmatter欠落・orphan・重複疑い・リンク切れの機械チェック、`--fix`で安全なfrontmatter補完のみ実施。stale判定・矛盾検出はLLM判断のまま）
-- [ ] `scripts/publish/publish.py` + `sync_state.json` 運用
-- [ ] Atlassian MCPの実測（tools/list・本文フォーマット・page-id更新挙動）
+- [x] `scripts/publish/publish.py`（`plan`でcreate/update/skip/blockedを判定しdry-run表示、`record`でMCP呼び出し後の結果をsync_state.json + frontmatterへ書き戻す。**MCP発火自体はagentが行う**、スクリプトは呼べない）。合成データのplan/record往復で動作確認済み
+- [ ] Atlassian MCPの実測（tools/list・本文フォーマット・page-id更新挙動）。現時点で接続済みMCPインスタンス未確認のため未実施
 
 未実装の操作を求められた場合は、決定論的スクリプトが無いことを明示した上で、手動またはLLM単体での代替手順を提案すること。

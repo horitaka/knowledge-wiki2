@@ -102,7 +102,7 @@ git commitが自然なチェックポイント兼監査。共有Confluenceへの
 - [x] 抽出スクリプト3種（`scripts/ingest_prep/transcript.py` / `pptx_extract.py` / `teams_extract.py`）。合成データで検証済み。**実サンプル未検証**（特にWord(.docx)議事録の話者/時刻レイアウトは仮のヒューリスティック — docs/llm-wiki.md §10）
 - [x] 少数ソースでの手動ingest検証（合成サンプル3件・VTT/pptx/Teams CSV）。抽出→レビュー→wiki反映→index/overview更新→log追記の一連のワークフローを確認。詳細は `wiki/log.md` の2026-07-13 22:00エントリ
 - [ ] `scripts/search.py`
-- [ ] `scripts/lint.py`
+- [x] `scripts/lint.py`（frontmatter欠落・orphan・重複疑い・リンク切れの機械チェック、`--fix`で安全なfrontmatter補完のみ実施。stale判定・矛盾検出はLLM判断のまま）
 - [ ] `scripts/publish/publish.py` + `sync_state.json` 運用
 - [ ] Atlassian MCPの実測（tools/list・本文フォーマット・page-id更新挙動）
 

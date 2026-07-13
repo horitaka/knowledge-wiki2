@@ -7,11 +7,12 @@
 ## 手順
 
 1. **配置**: 元ファイルを `raw/{transcripts,decks,teams}/` の適切なサブディレクトリに置く
-2. **抽出（決定論的・スクリプト）**: 対応するスクリプトで正規化mdへ変換する
-   - VTT/Word議事録 → `scripts/ingest_prep/transcript.py`
-   - pptx進捗デッキ → `scripts/ingest_prep/pptx_extract.py`
-   - Teams CSV → `scripts/ingest_prep/teams_extract.py`
-   - **現状これらのスクリプトは未実装（SKILL.mdの実装状況を参照）。実装済みでない場合はLLMが直接raw内容を読み、正規化md相当の構造（日付・出席者・話者別発話 or スレッド復元）を手動で作ってから次のステップへ進む**
+2. **抽出（決定論的・スクリプト）**: 対応するスクリプトで正規化mdへ変換する。出力は入力と同じディレクトリに同名の `.md` として書き出す（例: `raw/transcripts/2026-07-10_定例.vtt` → `raw/transcripts/2026-07-10_定例.md`）
+   - VTT/Word議事録 → `python3 scripts/ingest_prep/transcript.py <input> [-o <output>]`（`.docx` は `pip install -r scripts/requirements.txt` が必要）
+   - pptx進捗デッキ → `python3 scripts/ingest_prep/pptx_extract.py <input> [-o <output>]`（要 `scripts/requirements.txt`）
+   - Teams CSV → `python3 scripts/ingest_prep/teams_extract.py <input> [-o <output>]`（標準ライブラリのみ、依存なし）
+   - 3スクリプトとも合成データでの検証は済んでいるが、**実サンプルでは未検証**。特にWord(.docx)議事録は話者名/タイムスタンプのレイアウトを正規表現で推測しており、想定と異なる場合は本文が丸ごと「未パース区間」に落ちる（サイレントに消えることはない）。実サンプル投入時にレイアウトのズレがないか必ず確認する
+   - スクリプトが失敗する、または対象の入力形式に対応していない場合は、LLMが直接raw内容を読み、正規化md相当の構造（日付・出席者・話者別発話 or スレッド復元）を手動で作ってから次のステップへ進む
 3. **人によるレビュー（HOTL①）**: 正規化mdの内容が元ソースを正しく反映しているか、機微情報が含まれていないかを人が確認する
 4. **要点確認（HOTL②）**: LLMが正規化mdを読み、抽出した要点（決定・アクションアイテム・言及されたentity等）を対話で人に確認する
 5. **wiki反映**:

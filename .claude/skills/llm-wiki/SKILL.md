@@ -99,7 +99,7 @@ git commitが自然なチェックポイント兼監査。共有Confluenceへの
 ## 現在の実装状況
 
 - [x] ディレクトリ骨格 / SKILL.md / ページ型・命名規約・frontmatterスキーマ
-- [ ] 抽出スクリプト3種（`scripts/ingest_prep/transcript.py` / `pptx_extract.py` / `teams_extract.py`）
+- [x] 抽出スクリプト3種（`scripts/ingest_prep/transcript.py` / `pptx_extract.py` / `teams_extract.py`）。合成データで検証済み。**実サンプル未検証**（特にWord(.docx)議事録の話者/時刻レイアウトは仮のヒューリスティック — docs/llm-wiki.md §10）
 - [ ] `scripts/search.py`
 - [ ] `scripts/lint.py`
 - [ ] `scripts/publish/publish.py` + `sync_state.json` 運用

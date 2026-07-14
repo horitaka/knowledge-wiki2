@@ -7,16 +7,52 @@
 
 判断（ステータス表・リスク一覧・マイルストーンの意味づけ等）は行わない。
 構造の正規化のみ。テーブルは汎用的にmarkdown表として書き出す。
+
+開くパスワードで暗号化されたpptx（OLE複合文書形式）は msoffcrypto-tool で
+復号してから python-pptx に渡す。「編集の制限」等パスワード無しで開ける
+保護は通常のzipのままなので python-pptx がそのまま読める（対応不要）。
 """
 from __future__ import annotations
 
 import argparse
+import getpass
+import io
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
+DEFAULT_PASSWORD_ENV = "PPTX_PASSWORD"
 
-def load_presentation(path: Path):
+
+class PasswordRequiredError(RuntimeError):
+    """暗号化pptxだがパスワードが未指定の場合。"""
+
+
+def _is_encrypted(path: Path) -> bool:
+    import msoffcrypto  # type: ignore
+
+    with open(path, "rb") as f:
+        return msoffcrypto.OfficeFile(f).is_encrypted()
+
+
+def _decrypt(path: Path, password: str) -> io.BytesIO:
+    import msoffcrypto  # type: ignore
+    from msoffcrypto.exceptions import DecryptionError, InvalidKeyError  # type: ignore
+
+    with open(path, "rb") as f:
+        office_file = msoffcrypto.OfficeFile(f)
+        try:
+            office_file.load_key(password=password, verify_password=True)
+            decrypted = io.BytesIO()
+            office_file.decrypt(decrypted)
+        except (InvalidKeyError, DecryptionError) as e:
+            raise RuntimeError(f"パスワードでの復号に失敗しました（パスワード違いの可能性）: {e}") from e
+    decrypted.seek(0)
+    return decrypted
+
+
+def load_presentation(path: Path, password: str | None = None):
     try:
         from pptx import Presentation  # type: ignore
     except ImportError as e:
@@ -24,7 +60,24 @@ def load_presentation(path: Path):
             "python-pptx が必要です（pip install python-pptx）。"
             "requirements.txt を参照してください。"
         ) from e
-    return Presentation(str(path))
+
+    try:
+        encrypted = _is_encrypted(path)
+    except ImportError as e:
+        raise RuntimeError(
+            "msoffcrypto-tool が必要です（pip install msoffcrypto-tool）。"
+            "requirements.txt を参照してください。"
+        ) from e
+
+    if not encrypted:
+        return Presentation(str(path))
+
+    if not password:
+        raise PasswordRequiredError(
+            "このpptxはパスワードで保護されています。"
+            f"--password / --password-file / 環境変数 {DEFAULT_PASSWORD_ENV} のいずれかで指定してください。"
+        )
+    return Presentation(_decrypt(path, password))
 
 
 def _picture_shape_type():
@@ -122,23 +175,59 @@ def render_markdown(pptx_path: Path, prs) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def extract(path: Path) -> str:
-    prs = load_presentation(path)
+def extract(path: Path, password: str | None = None) -> str:
+    prs = load_presentation(path, password=password)
     return render_markdown(path, prs)
+
+
+def _resolve_password(args) -> str | None:
+    if args.password:
+        return args.password
+    if args.password_file:
+        first_line = args.password_file.read_text(encoding="utf-8").splitlines()[0]
+        return first_line.strip()
+    return os.environ.get(args.password_env)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="pptxファイル")
     parser.add_argument("-o", "--output", type=Path, default=None, help="出力先md（省略時は入力と同じディレクトリ・同名.md）")
+    parser.add_argument(
+        "--password",
+        default=None,
+        help="開くパスワード（暗号化pptxの場合のみ必要）。シェル履歴に残るため --password-file か環境変数を推奨",
+    )
+    parser.add_argument("--password-file", type=Path, default=None, help="パスワードを1行目に記載したファイル")
+    parser.add_argument(
+        "--password-env",
+        default=DEFAULT_PASSWORD_ENV,
+        help=f"パスワードを保持する環境変数名（デフォルト: {DEFAULT_PASSWORD_ENV}）",
+    )
     args = parser.parse_args()
 
     if not args.input.exists():
         print(f"入力ファイルが見つかりません: {args.input}", file=sys.stderr)
         return 1
 
+    password = _resolve_password(args)
+
     try:
-        markdown = extract(args.input)
+        markdown = extract(args.input, password=password)
+    except PasswordRequiredError:
+        if not sys.stdin.isatty():
+            print(
+                "抽出に失敗しました: このpptxはパスワードで保護されています。"
+                f"--password / --password-file / 環境変数 {args.password_env} のいずれかで指定してください。",
+                file=sys.stderr,
+            )
+            return 1
+        password = getpass.getpass("pptxのパスワード: ")
+        try:
+            markdown = extract(args.input, password=password)
+        except RuntimeError as e:
+            print(f"抽出に失敗しました: {e}", file=sys.stderr)
+            return 1
     except RuntimeError as e:
         print(f"抽出に失敗しました: {e}", file=sys.stderr)
         return 1

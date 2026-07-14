@@ -10,6 +10,7 @@
 2. **抽出（決定論的・スクリプト）**: 対応するスクリプトで正規化mdへ変換する。出力は入力と同じディレクトリに同名の `.md` として書き出す（例: `raw/transcripts/2026-07-10_定例.vtt` → `raw/transcripts/2026-07-10_定例.md`）
    - VTT/Word議事録 → `python3 scripts/ingest_prep/transcript.py <input> [-o <output>]`（`.docx` は `pip install -r scripts/requirements.txt` が必要）
    - pptx進捗デッキ → `python3 scripts/ingest_prep/pptx_extract.py <input> [-o <output>]`（要 `scripts/requirements.txt`）
+     - 開くパスワードで暗号化されたpptxは `--password` / `--password-file` / 環境変数 `PPTX_PASSWORD`（`--password-env`で変更可）のいずれかでパスワードを渡す。未指定かつ対話端末で実行時はプロンプトで入力を求める。シェル履歴を残さないため `--password-file` か環境変数を優先する。「編集の制限」等パスワード無しで開ける保護は対応不要（通常どおり抽出される）
    - Teams CSV → `python3 scripts/ingest_prep/teams_extract.py <input> [-o <output>]`（標準ライブラリのみ、依存なし）
    - 3スクリプトとも合成データでの検証は済んでいるが、**実サンプルでは未検証**。特にWord(.docx)議事録は話者名/タイムスタンプのレイアウトを正規表現で推測しており、想定と異なる場合は本文が丸ごと「未パース区間」に落ちる（サイレントに消えることはない）。実サンプル投入時にレイアウトのズレがないか必ず確認する
    - スクリプトが失敗する、または対象の入力形式に対応していない場合は、LLMが直接raw内容を読み、正規化md相当の構造（日付・出席者・話者別発話 or スレッド復元）を手動で作ってから次のステップへ進む

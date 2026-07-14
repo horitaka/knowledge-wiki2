@@ -7,7 +7,6 @@ timestamp:
 sources: []
 status: active
 confluence_id:
-confluence_space:
 ---
 
 ## このwikiについて

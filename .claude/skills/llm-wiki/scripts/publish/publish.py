@@ -6,14 +6,21 @@ references/publish.md の仕様に対応する。重要な制約: このスク�
 MCPツールを呼べるのはClaude Code agent（LLM）だけであり、Pythonプロセスからは呼べない。
 
 そのため役割を分割する。
-- `plan`  : 対象ページを走査し、create/update/skip/blocked を判定してdry-run結果を表示する
-            （sync_state.jsonへの書き込みは行わない。読むだけ）
-- `record`: agentがMCPツールを呼んでpage-idを得た**後**に、その結果を
-            sync_state.json とページ本体のfrontmatter（confluence_id/confluence_space）へ
-            書き戻す（本文・他のフィールドは一切書き換えない）
+- `configure`: 初回publish前に、公開先space・親ページIDを設定ファイル
+              （publish_config.json）へ記録する（1リポジトリ=1スペース=1親ページ配下という前提）。
+              ユーザーからの指定が必要な値。
+- `plan`     : 対象ページ・フォルダを走査し、create/update/skip/blocked を判定してdry-run結果を
+              表示する（sync_state.jsonへの書き込みは行わない。読むだけ）。
+              wiki/entities 等のディレクトリはConfluence側にも対応するフォルダページとして
+              作られ、その配下にリポジトリのフォルダ構造を再現する。
+- `record`   : agentがMCPツールを呼んでpage-idを得た**後**に、その結果を
+              sync_state.json （フォルダページ・コンテンツページ共通）と、コンテンツページ
+              本体のfrontmatter（confluence_idのみ）へ書き戻す（本文・他のフィールドは
+              一切書き換えない）。
 
-公開フロー: ingest → git commit → `plan`（dry-run） → 人の承認（HOTL③） →
-agentがMCP発火 → 各ページごとに `record` → agentが wiki/log.md に結果を追記。
+公開フロー: ingest → git commit → （初回のみ）`configure` → `plan`（dry-run） →
+人の承認（HOTL③） → agentがMCP発火（フォルダページ→配下ページの順） →
+呼び出しごとに `record` → agentが wiki/log.md に結果を追記。
 """
 from __future__ import annotations
 
@@ -39,8 +46,10 @@ VALID_TYPES = set(DIR_TYPE_MAP.values()) | {"overview"}
 SIZE_LIMIT_BYTES = 50 * 1024  # references/publish.md: 目安50KB未満
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
 
-DEFAULT_SYNC_STATE = Path(__file__).resolve().parent / "sync_state.json"
-DEFAULT_PLAN_OUT = Path(__file__).resolve().parent / "plan.json"
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_SYNC_STATE = SCRIPT_DIR / "sync_state.json"
+DEFAULT_PLAN_OUT = SCRIPT_DIR / "plan.json"
+DEFAULT_CONFIG = SCRIPT_DIR / "publish_config.json"
 
 
 @dataclass
@@ -53,17 +62,30 @@ class Page:
 
 
 @dataclass
+class FolderItem:
+    key: str  # ディレクトリ名（例: "entities"）
+    title: str
+    action: str  # create_folder | exists
+    confluence_id: str | None
+
+
+@dataclass
 class Item:
     path: str
     title: str | None
     action: str  # create | update | skip_unchanged | skip_draft | blocked
     confluence_id: str | None
-    confluence_space: str | None
+    parent_key: str | None  # 配下フォルダ名。overview等はNone（親ページ直下）
+    parent_confluence_id: str | None  # 未作成フォルダの場合はNone
     content_hash: str
     previous_hash: str | None
     size_bytes: int
     violations: list[str] = field(default_factory=list)
     body: str = ""
+
+
+def folder_sync_key(dirname: str) -> str:
+    return f"wiki/{dirname}"
 
 
 def expected_type_for(path: Path, wiki_dir: Path) -> str | None:
@@ -160,7 +182,45 @@ def load_sync_state(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def build_item(page: Page, sync_state: dict, default_space: str | None) -> Item:
+def save_sync_state(path: Path, sync_state: dict) -> None:
+    path.write_text(json.dumps(sync_state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def load_config(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_config(path: Path, space: str, root_page_id: str) -> None:
+    payload = {
+        "space": space,
+        "root_page_id": root_page_id,
+        "configured_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def parent_key_for(page: Page) -> str | None:
+    parts = page.path.parts  # 例: ('wiki', 'entities', 'x.md') / ('wiki', 'overview.md')
+    if len(parts) == 3:
+        return parts[1]
+    return None  # overview.md 等、wiki/ 直下のページは親ページ直下
+
+
+def build_folders(pages: list[Page], sync_state: dict) -> list[FolderItem]:
+    dirnames = sorted({parent_key_for(p) for p in pages if parent_key_for(p) is not None})
+    folders = []
+    for dirname in dirnames:
+        existing = sync_state.get(folder_sync_key(dirname))
+        if existing and existing.get("confluence_id"):
+            folders.append(FolderItem(dirname, dirname, "exists", existing["confluence_id"]))
+        else:
+            folders.append(FolderItem(dirname, dirname, "create_folder", None))
+    return folders
+
+
+def build_item(page: Page, sync_state: dict, root_page_id: str) -> Item:
     path_str = page.path.as_posix()
     title = page.fields.get("title")
     status = page.fields.get("status")
@@ -169,13 +229,18 @@ def build_item(page: Page, sync_state: dict, default_space: str | None) -> Item:
     new_hash = content_hash(title or "", body)
     violations = check_constraints(body, size_bytes)
 
+    p_key = parent_key_for(page)
+    if p_key is None:
+        parent_confluence_id = root_page_id
+    else:
+        folder_state = sync_state.get(folder_sync_key(p_key))
+        parent_confluence_id = folder_state.get("confluence_id") if folder_state else None
+
     existing = sync_state.get(path_str)
     previous_hash = existing.get("content_hash") if existing else None
 
     fm_confluence_id = page.fields.get("confluence_id")
-    fm_confluence_space = page.fields.get("confluence_space")
     existing_id = existing.get("confluence_id") if existing else None
-    existing_space = existing.get("confluence_space") if existing else None
 
     if fm_confluence_id and existing_id and fm_confluence_id != existing_id:
         violations.append(
@@ -183,43 +248,48 @@ def build_item(page: Page, sync_state: dict, default_space: str | None) -> Item:
         )
 
     confluence_id = fm_confluence_id or existing_id
-    confluence_space = fm_confluence_space or existing_space or default_space
 
     if status == "draft":
-        return Item(path_str, title, "skip_draft", confluence_id, confluence_space, new_hash, previous_hash, size_bytes, violations, body)
+        return Item(path_str, title, "skip_draft", confluence_id, p_key, parent_confluence_id, new_hash, previous_hash, size_bytes, violations, body)
 
     if violations:
-        return Item(path_str, title, "blocked", confluence_id, confluence_space, new_hash, previous_hash, size_bytes, violations, body)
+        return Item(path_str, title, "blocked", confluence_id, p_key, parent_confluence_id, new_hash, previous_hash, size_bytes, violations, body)
 
     if confluence_id:
-        if previous_hash == new_hash:
-            action = "skip_unchanged"
-        else:
-            action = "update"
+        action = "skip_unchanged" if previous_hash == new_hash else "update"
     else:
-        if not confluence_space:
-            violations.append("confluence_spaceが未指定（新規作成には --default-space かページfrontmatterのconfluence_spaceが必要）")
-            return Item(path_str, title, "blocked", confluence_id, confluence_space, new_hash, previous_hash, size_bytes, violations, body)
         action = "create"
 
-    return Item(path_str, title, action, confluence_id, confluence_space, new_hash, previous_hash, size_bytes, violations, body)
+    return Item(path_str, title, action, confluence_id, p_key, parent_confluence_id, new_hash, previous_hash, size_bytes, violations, body)
 
 
-def run_plan(wiki_dir: Path, repo_root: Path, sync_state_path: Path, default_space: str | None) -> list[Item]:
+def run_plan(wiki_dir: Path, repo_root: Path, sync_state_path: Path, root_page_id: str) -> tuple[list[FolderItem], list[Item]]:
     pages = collect_publishable_pages(wiki_dir, repo_root)
     sync_state = load_sync_state(sync_state_path)
-    return [build_item(page, sync_state, default_space) for page in pages]
+    folders = build_folders(pages, sync_state)
+    items = [build_item(page, sync_state, root_page_id) for page in pages]
+    return folders, items
 
 
-def format_plan_report(items: list[Item]) -> str:
+def format_plan_report(config: dict, folders: list[FolderItem], items: list[Item]) -> str:
     lines = []
+    lines.append(f"space={config['space']} root_page_id={config['root_page_id']}")
+    lines.append("")
+
     counts: dict[str, int] = {}
     for item in items:
         counts[item.action] = counts.get(item.action, 0) + 1
 
+    folders_to_create = [f for f in folders if f.action == "create_folder"]
+    if folders_to_create:
+        lines.append("## folders（配下ページより先に作成すること。親=root_page_id）")
+        for f in folders_to_create:
+            lines.append(f"- {f.key} (folder)")
+        lines.append("")
+
     order = ["blocked", "create", "update", "skip_unchanged", "skip_draft"]
     summary = " / ".join(f"{a}:{counts.get(a, 0)}" for a in order)
-    lines.append(f"publish plan: {summary}")
+    lines.append(f"pages: {summary}")
     lines.append("")
 
     if counts.get("blocked"):
@@ -235,7 +305,8 @@ def format_plan_report(items: list[Item]) -> str:
         lines.append("## create（新規公開）")
         for item in items:
             if item.action == "create":
-                lines.append(f"- {item.path} -> space={item.confluence_space} ({item.size_bytes}B)")
+                parent_desc = item.parent_confluence_id or "(この回のfolder作成後に確定)"
+                lines.append(f"- {item.path} -> parent={item.parent_key or 'root'}({parent_desc}) ({item.size_bytes}B)")
         lines.append("")
 
     if counts.get("update"):
@@ -243,7 +314,7 @@ def format_plan_report(items: list[Item]) -> str:
         for item in items:
             if item.action == "update":
                 lines.append(
-                    f"- {item.path} -> page_id={item.confluence_id} space={item.confluence_space} "
+                    f"- {item.path} -> page_id={item.confluence_id} "
                     f"({item.previous_hash} -> {item.content_hash})"
                 )
         lines.append("")
@@ -265,16 +336,29 @@ def format_plan_report(items: list[Item]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_plan_json(items: list[Item], out_path: Path) -> None:
+def write_plan_json(config: dict, folders: list[FolderItem], items: list[Item], out_path: Path) -> None:
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "space": config["space"],
+        "root_page_id": config["root_page_id"],
+        "folders": [
+            {
+                "key": f.key,
+                "title": f.title,
+                "action": f.action,
+                "confluence_id": f.confluence_id,
+                "parent_confluence_id": config["root_page_id"],
+            }
+            for f in folders
+        ],
         "items": [
             {
                 "path": item.path,
                 "title": item.title,
                 "action": item.action,
                 "confluence_id": item.confluence_id,
-                "confluence_space": item.confluence_space,
+                "parent_key": item.parent_key,
+                "parent_confluence_id": item.parent_confluence_id,
                 "content_hash": item.content_hash,
                 "previous_hash": item.previous_hash,
                 "size_bytes": item.size_bytes,
@@ -287,6 +371,40 @@ def write_plan_json(items: list[Item], out_path: Path) -> None:
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def cmd_configure(args: argparse.Namespace) -> int:
+    existing = load_config(args.config)
+
+    if existing and not args.force:
+        conflicting = (
+            (args.space and args.space != existing.get("space"))
+            or (args.root_page_id and args.root_page_id != existing.get("root_page_id"))
+        )
+        if conflicting:
+            print(
+                "既にpublish設定が存在します（変更するには --force が必要です）:\n"
+                f"  現在: space={existing.get('space')} root_page_id={existing.get('root_page_id')}\n"
+                f"  指定: space={args.space or '(変更なし)'} root_page_id={args.root_page_id or '(変更なし)'}\n"
+                "注意: root_page_id/space を変更しても、既存に作成済みのフォルダ・ページの"
+                "sync_state.jsonエントリは自動移行されない。",
+                file=sys.stderr,
+            )
+            return 1
+
+    new_space = args.space or existing.get("space")
+    new_root = args.root_page_id or existing.get("root_page_id")
+
+    if not new_space or not new_root:
+        print(
+            "space と root-page-id の両方が必要です（--space <SPACEKEY> --root-page-id <親ページID>）。",
+            file=sys.stderr,
+        )
+        return 1
+
+    save_config(args.config, new_space, new_root)
+    print(f"publish設定を保存しました: space={new_space} root_page_id={new_root} ({args.config})")
+    return 0
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     wiki_dir = args.wiki_dir.resolve()
     if not wiki_dir.is_dir():
@@ -294,11 +412,22 @@ def cmd_plan(args: argparse.Namespace) -> int:
         return 1
     repo_root = wiki_dir.parent
 
-    items = run_plan(wiki_dir, repo_root, args.sync_state, args.default_space)
-    print(format_plan_report(items))
+    config = load_config(args.config)
+    if not config.get("space") or not config.get("root_page_id"):
+        print(
+            "publish未設定です。space（Confluenceスペースキー）と root_page_id（公開先の親ページID）が"
+            f"設定されていません（{args.config}）。\n"
+            "ユーザーに確認のうえ、以下を実行してください:\n"
+            "  python3 scripts/publish/publish.py configure --space <SPACEKEY> --root-page-id <親ページID>",
+            file=sys.stderr,
+        )
+        return 2
+
+    folders, items = run_plan(wiki_dir, repo_root, args.sync_state, config["root_page_id"])
+    print(format_plan_report(config, folders, items))
 
     if args.out:
-        write_plan_json(items, args.out)
+        write_plan_json(config, folders, items, args.out)
         print(f"(agent向け詳細plan（本文含む）を書き出し: {args.out})")
 
     return 1 if any(item.action == "blocked" for item in items) else 0
@@ -327,6 +456,24 @@ def set_frontmatter_fields(raw_text: str, updates: dict) -> str:
 
 
 def cmd_record(args: argparse.Namespace) -> int:
+    sync_state = load_sync_state(args.sync_state)
+
+    if args.folder:
+        if args.folder not in DIR_TYPE_MAP:
+            print(
+                f"未知のfolder名です: {args.folder}（有効な値: {', '.join(sorted(DIR_TYPE_MAP))}）",
+                file=sys.stderr,
+            )
+            return 1
+        key = folder_sync_key(args.folder)
+        sync_state[key] = {
+            "confluence_id": args.confluence_id,
+            "published_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
+        save_sync_state(args.sync_state, sync_state)
+        print(f"記録しました: folder={args.folder} -> confluence_id={args.confluence_id}")
+        return 0
+
     wiki_dir = args.wiki_dir.resolve()
     repo_root = wiki_dir.parent
     page_path = (repo_root / args.page).resolve() if not args.page.is_absolute() else args.page
@@ -337,22 +484,17 @@ def cmd_record(args: argparse.Namespace) -> int:
     page = load_page(page_path, repo_root)
     new_hash = content_hash(page.fields.get("title") or "", page.body)
 
-    updated_text = set_frontmatter_fields(
-        page.raw_text,
-        {"confluence_id": args.confluence_id, "confluence_space": args.confluence_space},
-    )
+    updated_text = set_frontmatter_fields(page.raw_text, {"confluence_id": args.confluence_id})
     page_path.write_text(updated_text, encoding="utf-8")
 
-    sync_state = load_sync_state(args.sync_state)
     sync_state[page.path.as_posix()] = {
         "confluence_id": args.confluence_id,
-        "confluence_space": args.confluence_space,
         "content_hash": new_hash,
         "published_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
-    args.sync_state.write_text(json.dumps(sync_state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    save_sync_state(args.sync_state, sync_state)
 
-    print(f"記録しました: {page.path.as_posix()} -> confluence_id={args.confluence_id} space={args.confluence_space}")
+    print(f"記録しました: {page.path.as_posix()} -> confluence_id={args.confluence_id}")
     print("(wiki/log.mdへのpublishエントリ追記は別途agentが行うこと)")
     return 0
 
@@ -361,17 +503,28 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    plan_p = sub.add_parser("plan", help="dry-run: create/update/skip/blockedを判定して表示する（状態は書き換えない）")
+    configure_p = sub.add_parser(
+        "configure",
+        help="初回publish前に space・root_page_id（親ページID）を publish_config.json へ保存する",
+    )
+    configure_p.add_argument("--space", type=str, default=None, help="公開先Confluenceスペースキー")
+    configure_p.add_argument("--root-page-id", type=str, default=None, help="配下にwikiを再現する親ページのConfluence page-id")
+    configure_p.add_argument("--force", action="store_true", help="既存設定と異なる値への変更を許可する")
+    configure_p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    configure_p.set_defaults(func=cmd_configure)
+
+    plan_p = sub.add_parser("plan", help="dry-run: フォルダ/create/update/skip/blockedを判定して表示する（状態は書き換えない）")
     plan_p.add_argument("--wiki-dir", type=Path, default=Path("wiki"))
     plan_p.add_argument("--sync-state", type=Path, default=DEFAULT_SYNC_STATE)
-    plan_p.add_argument("--default-space", type=str, default=None, help="新規作成ページのconfluence_spaceの既定値（frontmatter未指定時に使用）")
+    plan_p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     plan_p.add_argument("--out", type=str, default=str(DEFAULT_PLAN_OUT), help="agent向けの詳細plan（本文含むJSON）の出力先。空文字で無効化")
     plan_p.set_defaults(func=cmd_plan)
 
-    record_p = sub.add_parser("record", help="agentがMCP発火後に、page-idをsync_state.jsonとfrontmatterへ書き戻す")
-    record_p.add_argument("--page", type=Path, required=True, help="対象ページのパス（repo-root相対 or 絶対パス）")
+    record_p = sub.add_parser("record", help="agentがMCP発火後に、page-idをsync_state.json（と該当すればfrontmatter）へ書き戻す")
+    record_target = record_p.add_mutually_exclusive_group(required=True)
+    record_target.add_argument("--page", type=Path, help="対象ページのパス（repo-root相対 or 絶対パス）")
+    record_target.add_argument("--folder", type=str, help="対象フォルダ名（例: entities）。フォルダページ作成の記録用")
     record_p.add_argument("--confluence-id", type=str, required=True)
-    record_p.add_argument("--confluence-space", type=str, required=True)
     record_p.add_argument("--wiki-dir", type=Path, default=Path("wiki"))
     record_p.add_argument("--sync-state", type=Path, default=DEFAULT_SYNC_STATE)
     record_p.set_defaults(func=cmd_record)

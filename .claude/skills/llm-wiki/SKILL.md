@@ -85,9 +85,11 @@ wiki/           LLMが維持するmarkdown群。公開wikiの正
 
 ### publish の要点
 
-`ingest（ローカル・レビュー付き）→ git commit → publish.py を dry-run → 承認（HOTL③）→ Atlassian MCP発火`
+`（初回のみ）space・親ページをユーザーに確認 → publish.py configure → ingest（ローカル・レビュー付き）→ git commit → publish.py を dry-run → 承認（HOTL③）→ Atlassian MCP発火`
 
-git commitが自然なチェックポイント兼監査。共有Confluenceへのpushは常に人の承認を挟む。MCPのハード制約（マクロ不可・ページサイズ上限・添付不可）は [references/publish.md](references/publish.md) を必ず確認すること。
+1リポジトリ=1スペース=1親ページ配下が前提。space・親ページ（root_page_id）はページごとのfrontmatterではなく `publish_config.json` に一箇所だけ持つ。**初回publish時**にユーザーからspaceと親ページの指定が無ければ、agentはAskUserQuestion等で明示的に問い合わせる（推測・仮決めしない）。**2回目以降**は `publish_config.json` に記録済みの値をそのまま使い、聞き直さない。`wiki/` のディレクトリ構造（entities/concepts/decisions/open_questions/summaries）は親ページ配下のフォルダページとして再現される。
+
+git commitが自然なチェックポイント兼監査。共有Confluenceへのpushは常に人の承認を挟む。MCPのハード制約（マクロ不可・ページサイズ上限・添付不可）とスペース/階層の設定方法は [references/publish.md](references/publish.md) を必ず確認すること。
 
 ## frontmatter
 
@@ -104,7 +106,7 @@ git commitが自然なチェックポイント兼監査。共有Confluenceへの
 - [x] 少数ソースでの手動ingest検証（合成サンプル3件・VTT/pptx/Teams CSV）。抽出→レビュー→wiki反映→index/overview更新→log追記の一連のワークフローを確認。詳細は `wiki/log.md` の2026-07-13 22:00エントリ
 - [ ] `scripts/search.py`
 - [x] `scripts/lint.py`（frontmatter欠落・orphan・重複疑い・リンク切れの機械チェック、`--fix`で安全なfrontmatter補完のみ実施。stale判定・矛盾検出はLLM判断のまま）
-- [x] `scripts/publish/publish.py`（`plan`でcreate/update/skip/blockedを判定しdry-run表示、`record`でMCP呼び出し後の結果をsync_state.json + frontmatterへ書き戻す。**MCP発火自体はagentが行う**、スクリプトは呼べない）。合成データのplan/record往復で動作確認済み
+- [x] `scripts/publish/publish.py`（`configure`でspace・親ページIDを`publish_config.json`へ一元管理、`plan`でフォルダ/create/update/skip/blockedを判定しdry-run表示、`record`でMCP呼び出し後の結果をsync_state.json + frontmatterへ書き戻す。**MCP発火自体はagentが行う**、スクリプトは呼べない）。1リポジトリ=1スペース=1親ページ配下、wikiのディレクトリ構造をConfluence側のフォルダページ階層として再現する設計に更新済み（2026-07-15）
 - [ ] Atlassian MCPの実測（tools/list・本文フォーマット・page-id更新挙動）。現時点で接続済みMCPインスタンス未確認のため未実施
 
 未実装の操作を求められた場合は、決定論的スクリプトが無いことを明示した上で、手動またはLLM単体での代替手順を提案すること。

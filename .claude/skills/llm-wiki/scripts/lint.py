@@ -10,7 +10,7 @@ references/lint.md の「機械チェック」4種を実施する。
 stale判定・矛盾検出はLLM判断の仕事であり、このスクリプトは行わない。
 
 既定ではread-only。`--fix` を指定した場合のみ、frontmatterに完全に欠落している
-安全なキー（type/tags/status/confluence_id/confluence_space）を補完する。
+安全なキー（type/tags/status/confluence_id）を補完する。
 本文、および既存のフィールド値は一切書き換えない（ハードルール、references/lint.md）。
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ DIR_TYPE_MAP = {
 VALID_TYPES = set(DIR_TYPE_MAP.values()) | {"overview"}
 VALID_STATUS = {"draft", "active", "stale", "superseded"}
 REQUIRED_FIELDS = ["type", "title", "description", "timestamp", "status"]
-SAFE_FIX_DEFAULTS = {"tags": [], "status": "draft", "confluence_id": None, "confluence_space": None}
+SAFE_FIX_DEFAULTS = {"tags": [], "status": "draft", "confluence_id": None}
 
 MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)[^)]*\)")
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
@@ -326,7 +326,7 @@ def main() -> int:
     parser.add_argument(
         "--fix",
         action="store_true",
-        help="frontmatterに完全欠落しているキー（type/tags/status/confluence_id/confluence_space）のみ既定値で補完する",
+        help="frontmatterに完全欠落しているキー（type/tags/status/confluence_id）のみ既定値で補完する",
     )
     args = parser.parse_args()
 

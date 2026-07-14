@@ -14,7 +14,6 @@ sources:
   - raw/teams/2026-07-11_thread-042.md
 status: active           # draft | active | stale | superseded
 confluence_id:            # 初回公開時に付与。空のまま未公開を表す
-confluence_space:         # 例: KNOW
 ---
 ```
 
@@ -30,7 +29,8 @@ confluence_space:         # 例: KNOW
 | `sources` | 必須（summaryは1件、entity/concept/decisionは複数可） | どの `raw/` ソースが当該ページの内容に寄与したかの相対パス一覧。来歴の唯一の記録場所 |
 | `status` | 必須 | 下表参照。lintのstale/矛盾判定の対象になる |
 | `confluence_id` | 公開後に必須 | 初回 `publish` 時にMCPから返却されるpage-idを記録する。冪等更新の鍵。未公開の間は空 |
-| `confluence_space` | 公開後に必須 | 公開先のConfluence spaceキー |
+
+公開先のConfluence space・親ページ（1リポジトリ=1スペース=1親ページ配下）はページごとのfrontmatterではなく、`scripts/publish/publish_config.json` に一箇所だけ設定する（[references/publish.md](publish.md) 参照）。ページ側にspace情報を持たせない。
 
 ## `status` の意味
 

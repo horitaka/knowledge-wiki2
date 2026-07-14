@@ -14,7 +14,7 @@
 実行: `python3 .claude/skills/llm-wiki/scripts/lint.py [--wiki-dir wiki] [--fix]`
 
 - 既定はread-only。exit codeはerrorが1件でもあれば1、なければ0
-- `--fix` は frontmatterに**完全に欠落しているキー**（`type`/`tags`/`status`/`confluence_id`/`confluence_space`）のみ既定値で補完する。`type` はディレクトリから、`status` は `draft` を既定値とする。**`title`/`description`/`timestamp`/`sources` は値を推測できないため対象外**（欠落していれば人/LLMが内容を見て埋める）
+- `--fix` は frontmatterに**完全に欠落しているキー**（`type`/`tags`/`status`/`confluence_id`）のみ既定値で補完する。`type` はディレクトリから、`status` は `draft` を既定値とする。**`title`/`description`/`timestamp`/`sources` は値を推測できないため対象外**（欠落していれば人/LLMが内容を見て埋める）
 - stale判定・矛盾検出はスクリプト化していない（決定論的に判定できないため。下記「LLM判断が必要なチェック」を参照）
 
 ## LLM判断が必要なチェック
@@ -32,6 +32,6 @@
 ## 実行手順
 
 1. `python3 .claude/skills/llm-wiki/scripts/lint.py` を実行し、機械チェックの結果を確認する
-2. 欠落キーで安全に補完できるもの（`type`/`tags`/`status`/`confluence_id`/`confluence_space`）は `--fix` 付きで再実行する。`title`/`description`/`timestamp`/`sources` の欠落や、`duplicate`/`duplicate_suspect`/`orphan` の指摘は本文の理解が要るため、LLMが該当ページを読んで判断する（新規作成すべきか、既存ページへ統合すべきか等）
+2. 欠落キーで安全に補完できるもの（`type`/`tags`/`status`/`confluence_id`）は `--fix` 付きで再実行する。`title`/`description`/`timestamp`/`sources` の欠落や、`duplicate`/`duplicate_suspect`/`orphan` の指摘は本文の理解が要るため、LLMが該当ページを読んで判断する（新規作成すべきか、既存ページへ統合すべきか等）
 3. `status: active` のページ間で矛盾がないか目視で確認する（entity/decisionを優先）。stale判定（更新が滞っているのに関連sourceが増えているページ）もここで行う
 4. 検出結果（機械チェックの残issue、矛盾、stale判定）を `wiki/open_questions/` および `wiki/log.md` に記録する

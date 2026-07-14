@@ -8,9 +8,10 @@
 
 1. **配置**: 元ファイルを `raw/{transcripts,decks,teams}/` の適切なサブディレクトリに置く
 2. **抽出（決定論的・スクリプト）**: 対応するスクリプトで正規化mdへ変換する。出力は入力と同じディレクトリに同名の `.md` として書き出す（例: `raw/transcripts/2026-07-10_定例.vtt` → `raw/transcripts/2026-07-10_定例.md`）
-   - VTT/Word議事録 → `python3 scripts/ingest_prep/transcript.py <input> [-o <output>]`（`.docx` は `pip install -r scripts/requirements.txt` が必要）
+   - VTT/Word議事録 → `python3 scripts/ingest_prep/transcript.py <input> [-o <output>]`（`.docx` は `pip install -r scripts/requirements.txt` が必要）。開くパスワードで暗号化されたdocxの復号は未対応（IRM保護の検出は対応、下記参照）
    - pptx進捗デッキ → `python3 scripts/ingest_prep/pptx_extract.py <input> [-o <output>]`（要 `scripts/requirements.txt`）
      - 開くパスワードで暗号化されたpptxは `--password` / `--password-file` / 環境変数 `PPTX_PASSWORD`（`--password-env`で変更可）のいずれかでパスワードを渡す。未指定かつ対話端末で実行時はプロンプトで入力を求める。シェル履歴を残さないため `--password-file` か環境変数を優先する。「編集の制限」等パスワード無しで開ける保護は対応不要（通常どおり抽出される）
+     - **Microsoft情報保護ラベル（IRM/Azure RMS）で保護されたファイル（pptx/docx共通）はパスワードでは復号できない**（コンテンツキーがAzure ADの利用者IDに紐づくライセンスサーバからしか取得できないため）。スクリプトはこれを検出して明確なエラーを返す（`--password`を渡しても解決しない）。対処は**人手のみ**: ラベル解除権限を持つ人がOffice上でファイルを開き、ラベル/保護を解除した複製を作成して `raw/` に配置し直してから再実行する。LLMが暗号化バイト列を直接読んで代替する手段はない（手順2の「スクリプトが失敗した場合はLLMが手動で…」は適用不可）
    - Teams CSV → `python3 scripts/ingest_prep/teams_extract.py <input> [-o <output>]`（標準ライブラリのみ、依存なし）
    - 3スクリプトとも合成データでの検証は済んでいるが、**実サンプルでは未検証**。特にWord(.docx)議事録は話者名/タイムスタンプのレイアウトを正規表現で推測しており、想定と異なる場合は本文が丸ごと「未パース区間」に落ちる（サイレントに消えることはない）。実サンプル投入時にレイアウトのズレがないか必ず確認する
    - スクリプトが失敗する、または対象の入力形式に対応していない場合は、LLMが直接raw内容を読み、正規化md相当の構造（日付・出席者・話者別発話 or スレッド復元）を手動で作ってから次のステップへ進む

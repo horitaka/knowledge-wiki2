@@ -11,6 +11,9 @@
 開くパスワードで暗号化されたpptx（OLE複合文書形式）は msoffcrypto-tool で
 復号してから python-pptx に渡す。「編集の制限」等パスワード無しで開ける
 保護は通常のzipのままなので python-pptx がそのまま読める（対応不要）。
+
+Microsoft情報保護ラベル（IRM/Azure RMS）で保護されたpptxはパスワードでは
+復号できないため、明確なエラーで検出する（office_crypto.py参照）。
 """
 from __future__ import annotations
 
@@ -22,18 +25,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from office_crypto import PasswordRequiredError, is_encrypted as _is_encrypted
+
 DEFAULT_PASSWORD_ENV = "PPTX_PASSWORD"
-
-
-class PasswordRequiredError(RuntimeError):
-    """暗号化pptxだがパスワードが未指定の場合。"""
-
-
-def _is_encrypted(path: Path) -> bool:
-    import msoffcrypto  # type: ignore
-
-    with open(path, "rb") as f:
-        return msoffcrypto.OfficeFile(f).is_encrypted()
 
 
 def _decrypt(path: Path, password: str) -> io.BytesIO:

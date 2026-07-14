@@ -1,6 +1,0 @@
-message_id,parent_message_id,timestamp,author_name,author_email,body,channel_or_chat,mentions,message_type,has_attachment
-msg001,,2026-07-09T10:15:00+09:00,佐藤花子,sato.hanako@example.com,"現行システムのエクスポート仕様確定が想定より遅れそうです。ベンダー側のヒアリングが8月にずれ込む可能性があります。",在庫刷新プロジェクト,,message,false
-msg002,msg001,2026-07-09T10:22:00+09:00,田中太郎,tanaka.taro@example.com,"それは困りますね。7月中確定は必達ラインです。ベンダー側の担当者と直接調整できませんか。",在庫刷新プロジェクト,佐藤花子,message,false
-msg003,msg001,2026-07-09T10:40:00+09:00,佐藤花子,sato.hanako@example.com,"クラウドギア社の担当営業に確認します。来週頭までに見通しを共有します。",在庫刷新プロジェクト,,message,false
-msg004,,2026-07-09T14:00:00+09:00,鈴木一郎,suzuki.ichiro@example.com,"SLAの追加確認について、クラウドギア社から回答がありました。24時間以内の障害対応で合意できそうです。添付は先方からの回答書です。",在庫刷新プロジェクト,,message,true
-msg005,,2026-07-09T15:00:00+09:00,,,"金子次郎さんがチームに追加されました",在庫刷新プロジェクト,,system,false

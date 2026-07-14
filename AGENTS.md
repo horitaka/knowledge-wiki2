@@ -12,3 +12,4 @@
 3. 複数ソースを跨いで圧縮するページ（entity/decision/concept）だけが価値を持つ。1ソースの書き写しは作らない
 4. ページを単独削除しない（`status: superseded` にする）
 5. Confluenceへの公開は必ず人の承認を挟む（HOTLゲート）
+6. スキル実行時にPythonなどの依存関係インストールが必要な場合は、システム環境を汚さないよう venv を利用すること（例: `python3 -m venv .venv && source .venv/bin/activate && pip install -r .claude/skills/llm-wiki/scripts/requirements.txt`）

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(/.claude/skills/llm-wiki/**)",
+      "Bash(python3 -m venv venv)"
+    ]
+  }
+}

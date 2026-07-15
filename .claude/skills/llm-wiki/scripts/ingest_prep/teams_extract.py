@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-"""Teams CSV -> スレッド復元済み正規化markdown。
+"""Teams CSV / 自由記述テキスト（txt / md）-> 正規化markdown。
 
+CSVは message_id/parent_message_id を使いスレッド復元・発言者特定を行う確定実装。
 入力カラム定義は docs/llm-wiki.md §7.3 / references/ingest.md を参照。
+
+txt/md は人手でコピー&ペースト・転記されたチャットログを想定し、CSVが前提とする
+message_id/parent_message_id を持たないため、スレッド復元・発言者ごとの構造抽出は
+行わない。frontmatterを付与して本文をそのままラップするだけの決定論的パススルー
+とし、決定・未解決の論点・非公式な知見の抽出はHOTL②でのLLM/人の判断に委ねる
+（references/ingest.md「Teamsチャットの特性」参照）。
+
 判断（要約・矛盾検出等）は行わない。構造の正規化のみ。
 """
 from __future__ import annotations
@@ -138,16 +146,49 @@ def render_markdown(csv_path: Path, roots: list[Message], all_messages: list[Mes
     return "\n".join(lines).rstrip() + "\n"
 
 
-def extract(csv_path: Path) -> str:
-    messages = load_messages(csv_path)
-    roots = build_threads(messages)
-    all_messages = list(flatten(roots))
-    return render_markdown(csv_path, roots, all_messages)
+def render_markdown_plain(source_path: Path, source_format: str, body: str) -> str:
+    lines = [
+        "---",
+        "source_type: teams",
+        f"source_format: {source_format}",
+        f"original_file: {source_path.as_posix()}",
+        f"extracted_at: {datetime.now().astimezone().isoformat(timespec='seconds')}",
+        "channels: []",
+        "---",
+        "",
+        f"# Teams チャット抽出: {source_path.name}",
+        "",
+        "## 本文",
+        "",
+        body.strip(),
+        "",
+        "> スレッド復元（`parent_message_id`）・発言者ごとの構造抽出は行っていません"
+        "（自由記述のテキストのため）。HOTL②で内容を確認し、Teamsチャットの特性"
+        "（逐語要約ではなく決定・未解決の論点・非公式な知見の抽出に振り切る、"
+        "references/ingest.md参照）を踏まえてwikiへ反映してください。",
+        "",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def extract(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        messages = load_messages(path)
+        roots = build_threads(messages)
+        all_messages = list(flatten(roots))
+        return render_markdown(path, roots, all_messages)
+    elif suffix in (".txt", ".md"):
+        body = path.read_text(encoding="utf-8")
+        source_format = suffix.lstrip(".")
+        return render_markdown_plain(path, source_format, body)
+    else:
+        raise ValueError(f"未対応の拡張子です: {suffix}（.csv / .txt / .md）")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path, help="Teams CSVファイル（RFC 4180, UTF-8）")
+    parser.add_argument("input", type=Path, help="Teams CSV / txt / md ファイル")
     parser.add_argument("-o", "--output", type=Path, default=None, help="出力先md（省略時は入力と同じディレクトリ・同名.md）")
     args = parser.parse_args()
 
@@ -162,6 +203,13 @@ def main() -> int:
         return 1
 
     output_path = args.output or args.input.with_suffix(".md")
+    if output_path.resolve() == args.input.resolve():
+        print(
+            f"出力先が入力ファイルと同一です: {output_path}"
+            "（raw/は不変の一次ソースのため上書きできません。-o で別名の出力先を指定してください）",
+            file=sys.stderr,
+        )
+        return 1
     output_path.write_text(markdown, encoding="utf-8")
     print(f"書き出しました: {output_path}")
     return 0

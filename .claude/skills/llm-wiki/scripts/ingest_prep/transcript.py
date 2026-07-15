@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""会議トランスクリプト（VTT または Word .docx）-> 正規化markdown。
+"""会議議事録・トランスクリプト（VTT / Word .docx / txt / md）-> 正規化markdown。
 
 VTTは仕様が定まっているため確定実装。docx（MS Teamsトランスクリプトの
 エクスポート）は実サンプル未検証のため best-effort なヒューリスティック実装。
 docx側で構造を認識できなかった段落は "unparsed" として出力に残し、
 サイレントに消さない（実サンプルでの検証・SKILL.mdの調整に使う）。
+
+txt/md は人手で書かれた自由記述の議事録メモを想定し、VTT/docxのような
+話者/タイムスタンプの構造抽出は行わない。frontmatterを付与して本文を
+そのままラップするだけの決定論的パススルーとし、出席者・決定事項等の
+判断はHOTL②でLLM/人に委ねる。
 
 Microsoft情報保護ラベル（IRM/Azure RMS）で保護されたdocxは復号できないため、
 明確なエラーで検出する（office_crypto.py参照）。開くパスワードで暗号化された
@@ -172,6 +177,32 @@ def render_markdown(source_path: Path, source_format: str, utterances: list[Utte
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_markdown_plain(source_path: Path, source_format: str, body: str) -> str:
+    date = guess_date_from_filename(source_path)
+
+    lines = [
+        "---",
+        "source_type: transcript",
+        f"source_format: {source_format}",
+        f"original_file: {source_path.as_posix()}",
+        f"extracted_at: {datetime.now().astimezone().isoformat(timespec='seconds')}",
+        f"meeting_date: {date or ''}",
+        "attendees: []",
+        "---",
+        "",
+        f"# 会議議事録: {source_path.stem}",
+        "",
+        "## 本文",
+        "",
+        body.strip(),
+        "",
+        "> 話者/出席者の構造抽出は行っていません（自由記述の議事録メモのため）。"
+        "HOTL②で内容を確認し、必要な要点をwikiへ反映してください。",
+        "",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def extract(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix == ".vtt":
@@ -179,17 +210,22 @@ def extract(path: Path) -> str:
         utterances = parse_vtt(content)
         unparsed: list[str] = []
         source_format = "vtt"
+        return render_markdown(path, source_format, utterances, unparsed)
     elif suffix == ".docx":
         utterances, unparsed = parse_docx(path)
         source_format = "docx"
+        return render_markdown(path, source_format, utterances, unparsed)
+    elif suffix in (".txt", ".md"):
+        body = path.read_text(encoding="utf-8")
+        source_format = suffix.lstrip(".")
+        return render_markdown_plain(path, source_format, body)
     else:
-        raise ValueError(f"未対応の拡張子です: {suffix}（.vtt または .docx）")
-    return render_markdown(path, source_format, utterances, unparsed)
+        raise ValueError(f"未対応の拡張子です: {suffix}（.vtt / .docx / .txt / .md）")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path, help="VTT または docx ファイル")
+    parser.add_argument("input", type=Path, help="VTT / docx / txt / md ファイル")
     parser.add_argument("-o", "--output", type=Path, default=None, help="出力先md（省略時は入力と同じディレクトリ・同名.md）")
     args = parser.parse_args()
 
@@ -204,6 +240,13 @@ def main() -> int:
         return 1
 
     output_path = args.output or args.input.with_suffix(".md")
+    if output_path.resolve() == args.input.resolve():
+        print(
+            f"出力先が入力ファイルと同一です: {output_path}"
+            "（raw/は不変の一次ソースのため上書きできません。-o で別名の出力先を指定してください）",
+            file=sys.stderr,
+        )
+        return 1
     output_path.write_text(markdown, encoding="utf-8")
     print(f"書き出しました: {output_path}")
     return 0

@@ -9,6 +9,7 @@
 1. **配置**: 元ファイルを `raw/{transcripts,decks,teams}/` の適切なサブディレクトリに置く
 2. **抽出（決定論的・スクリプト）**: 対応するスクリプトで正規化mdへ変換する。出力は入力と同じディレクトリに同名の `.md` として書き出す（例: `raw/transcripts/2026-07-10_定例.vtt` → `raw/transcripts/2026-07-10_定例.md`）
    - VTT/Word議事録 → `python3 scripts/ingest_prep/transcript.py <input> [-o <output>]`（`.docx` は `pip install -r scripts/requirements.txt` が必要）。開くパスワードで暗号化されたdocxの復号は未対応（IRM保護の検出は対応、下記参照）
+   - 自由記述の議事録（txt/md） → 同じ `python3 scripts/ingest_prep/transcript.py <input> [-o <output>]` で処理する（追加の依存なし）。人手で書かれたメモを想定しており、VTT/docxのような話者/タイムスタンプの構造抽出は行わず、frontmatterを付与して本文をそのままラップするだけ（出席者・決定事項の判断はHOTL②に委ねる）。**入力が `.md` の場合、省略時の出力先（同名`.md`）が入力自身と衝突し `raw/` の不変性を壊すため、必ず `-o` で別名の出力先を指定する**（未指定だとスクリプトがエラーで停止する）
    - pptx進捗デッキ → `python3 scripts/ingest_prep/pptx_extract.py <input> [-o <output>]`（要 `scripts/requirements.txt`）
      - 開くパスワードで暗号化されたpptxは `--password` / `--password-file` / 環境変数 `PPTX_PASSWORD`（`--password-env`で変更可）のいずれかでパスワードを渡す。未指定かつ対話端末で実行時はプロンプトで入力を求める。シェル履歴を残さないため `--password-file` か環境変数を優先する。「編集の制限」等パスワード無しで開ける保護は対応不要（通常どおり抽出される）
    - PDF進捗デッキ → `python3 scripts/ingest_prep/pdf_extract.py <input> [-o <output>] [--source-type deck]`（要 `scripts/requirements.txt`。ページ単位でテキストを抽出、本文/表の区別はしない）
